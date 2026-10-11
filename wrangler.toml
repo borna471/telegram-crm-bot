@@ -1,0 +1,20 @@
+name = "telegram-crm-bot"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+NOTION_DATABASE_ID = "d361e8b4face41b8b76744d5ebdf90f7"
+TIMEZONE = "America/Los_Angeles"
+
+# Secrets (set with `npx wrangler secret put <NAME>`):
+# TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, ALLOWED_TELEGRAM_USER_ID,
+# ANTHROPIC_API_KEY, NOTION_TOKEN
+
+[[durable_objects.bindings]]
+name = "BOT"
+class_name = "Bot"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Bot"]

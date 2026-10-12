@@ -24,6 +24,8 @@ npx wrangler login
 2. **Anthropic API key.** Create one at [console.anthropic.com](https://console.anthropic.com/settings/keys). Usage is billed per request.
 3. **Notion token.** Create an internal integration at [notion.so/profile/integrations](https://www.notion.so/profile/integrations) and copy its secret. Then open the **Personal CRM** page in Notion, click `•••` → **Connections**, and add the integration so it can read and write the People database.
 
+**Optional: Apollo for emails.** If you add an Apollo API key, the bot looks the person up in Apollo whenever Claude didn't find an email (or only guessed one), using their LinkedIn URL. In Apollo, go to **Settings → Integrations → API Keys → Create new key** and give it access to `people/match` (People Enrichment). Each match uses 1 Apollo credit, and nothing is charged when Apollo finds no data. The card says when an email came from Apollo. Without the key, the bot works as before.
+
 The People database ID is already set in `wrangler.toml` (`NOTION_DATABASE_ID`). `TIMEZONE` there sets the date used for "Last contacted".
 
 ### 2. Store the secrets
@@ -34,6 +36,7 @@ npx wrangler secret put ALLOWED_TELEGRAM_USER_ID     # your numeric Telegram use
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET      # any random string, e.g. `openssl rand -hex 16`
 npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler secret put NOTION_TOKEN
+npx wrangler secret put APOLLO_API_KEY               # optional
 ```
 
 ### 3. Deploy and connect Telegram
@@ -56,6 +59,7 @@ Then send `/start` to your bot.
 
 - `src/claude.ts`: the research prompt and Claude call (web search + web fetch, result returned through a strict `report_result` tool).
 - `src/notion.ts`: reads and writes People rows. "Current company" is stored as `Company (Role)` to match the existing rows.
+- `src/apollo.ts`: optional Apollo People Enrichment lookup for emails.
 - `src/telegram.ts`: the few Telegram Bot API calls used.
 
 ## Development

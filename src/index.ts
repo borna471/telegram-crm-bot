@@ -3,6 +3,7 @@ import { research, normalizeLinkedIn, type Candidate, type Result } from "./clau
 import { Notion, companyLabel, type Row } from "./notion";
 import { Telegram, type TgMessage, type Update } from "./telegram";
 import { hashtags, mergeContact, union } from "./util";
+import { apolloLookup, applyApollo } from "./apollo";
 
 export interface Env {
   BOT: DurableObjectNamespace<Bot>;
@@ -12,6 +13,7 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   NOTION_TOKEN: string;
   NOTION_DATABASE_ID: string;
+  APOLLO_API_KEY?: string;
   TIMEZONE: string;
 }
 
@@ -168,7 +170,22 @@ export class Bot extends DurableObject<Env> {
       return;
     }
 
-    const contact = result.contact;
+    let contact = result.contact;
+    let source: string | null = null;
+    if (this.env.APOLLO_API_KEY && (!contact.email || contact.low_confidence.includes("email"))) {
+      try {
+        const apollo = await apolloLookup(this.env.APOLLO_API_KEY, contact);
+        if (apollo) {
+          const applied = applyApollo(contact, apollo);
+          contact = applied.contact;
+          if (applied.usedEmail) source = `Email from Apollo (${apollo.emailStatus ?? "unverified"})`;
+        }
+      } catch (err) {
+        // Apollo is a bonus; save the row anyway.
+        console.error(err);
+        source = `Apollo lookup failed: ${(err as Error).message}`;
+      }
+    }
     const tags = hashtags(text);
     const existing = await this.notion.findExisting(contact);
     let row: Row;
@@ -179,7 +196,7 @@ export class Bot extends DurableObject<Env> {
     } else {
       row = await this.notion.create(contact, tags);
     }
-    await this.sendCard(chat, row, existing ? "Updated existing row" : "Saved", contact.low_confidence, msg.message_id);
+    await this.sendCard(chat, row, existing ? "Updated existing row" : "Saved", contact.low_confidence, msg.message_id, source);
   }
 
   private async correct(msg: TgMessage, pageId: string, text: string): Promise<void> {
@@ -206,7 +223,7 @@ Apply the correction and return the full updated contact with status "found". Re
     await this.sendCard(msg.chat.id, updated, "Updated", c.low_confidence, msg.message_id);
   }
 
-  private async sendCard(chat: number, row: Row, verb: string, unsure: string[], replyTo: number) {
+  private async sendCard(chat: number, row: Row, verb: string, unsure: string[], replyTo: number, extra?: string | null) {
     const c = row.contact;
     const lines = [
       `${verb}: ${c.name}`,
@@ -219,6 +236,7 @@ Apply the correction and return the full updated contact with status "found". Re
       row.tags.length ? `Tags: ${row.tags.join(", ")}` : null,
       c.notes ? `Notes: ${c.notes.length > 600 ? `${c.notes.slice(0, 600)}…` : c.notes}` : null,
       unsure.length ? `Unsure about: ${unsure.join(", ")}` : null,
+      extra ?? null,
       "",
       `Reply to this message to correct it. ${row.url}`,
     ].filter((l) => l !== null);

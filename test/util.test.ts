@@ -55,3 +55,53 @@ test("parseResult drops invalid values", () => {
   assert.equal(r.contact.last_contacted, null);
   assert.equal(parseResult({ status: "ambiguous", contact: null, candidates: [], message: "" }).status, "not_found");
 });
+
+import { applyApollo } from "../src/apollo";
+
+test("Apollo fills a missing email and replaces a guessed one only when verified", () => {
+  const apollo = { email: "jane@acme.com", emailStatus: "verified", title: "CTO", company: "Acme", xHandle: "jane" };
+  const filled = applyApollo({ ...base }, apollo);
+  assert.equal(filled.usedEmail, true);
+  assert.equal(filled.contact.email, "jane@acme.com");
+  assert.equal(filled.contact.role, "CTO");
+
+  const guessed = { ...base, email: "j@acme.com", low_confidence: ["email"] };
+  assert.equal(applyApollo(guessed, apollo).contact.email, "jane@acme.com");
+  assert.deepEqual(applyApollo(guessed, apollo).contact.low_confidence, []);
+  assert.equal(applyApollo(guessed, { ...apollo, emailStatus: "likely" }).contact.email, "j@acme.com");
+
+  const sure = { ...base, email: "jane@jane.dev" };
+  assert.equal(applyApollo(sure, apollo).contact.email, "jane@jane.dev");
+
+  const unverified = applyApollo({ ...base }, { ...apollo, emailStatus: "personal" });
+  assert.deepEqual(unverified.contact.low_confidence, ["email"]);
+});
+
+import { apolloLookup } from "../src/apollo";
+
+test("apolloLookup sends the key and LinkedIn URL, and skips placeholders and mismatches", async () => {
+  const realFetch = globalThis.fetch;
+  let seen: { url: string; headers: Record<string, string> } | null = null;
+  const respond = (body: unknown) => {
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      seen = { url, headers: init.headers as Record<string, string> };
+      return new Response(JSON.stringify(body));
+    }) as typeof fetch;
+  };
+  const c = { ...base, linkedin: "https://www.linkedin.com/in/jane-doe/" };
+  try {
+    respond({ match_confidence: "high", person: {
+      linkedin_url: "http://www.linkedin.com/in/jane-doe", email: "email_not_unlocked@domain.com",
+      personal_emails: ["jane@gmail.com"], title: "CTO", twitter_url: "https://twitter.com/janedoe",
+      organization: { name: "Acme" } } });
+    const r = await apolloLookup("KEY", c);
+    assert.equal(seen!.headers["x-api-key"], "KEY");
+    assert.match(seen!.url, /people\/match\?.*linkedin_url=https%3A%2F%2Fwww.linkedin.com%2Fin%2Fjane-doe%2F/);
+    assert.deepEqual(r, { email: "jane@gmail.com", emailStatus: "personal", title: "CTO", company: "Acme", xHandle: "janedoe" });
+
+    respond({ match_confidence: "high", person: { linkedin_url: "http://www.linkedin.com/in/someone-else", email: "x@y.com" } });
+    assert.equal(await apolloLookup("KEY", c), null);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

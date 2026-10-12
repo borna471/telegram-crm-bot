@@ -22,12 +22,24 @@ export default {
     // One-time: GET /setup?key=<TELEGRAM_WEBHOOK_SECRET> points Telegram at this Worker.
     if (req.method === "GET" && url.pathname === "/setup") {
       if (url.searchParams.get("key") !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("Forbidden", { status: 403 });
-      const result = await new Telegram(env.TELEGRAM_BOT_TOKEN).call("setWebhook", {
-        url: `${url.origin}/webhook`,
-        secret_token: env.TELEGRAM_WEBHOOK_SECRET,
-        allowed_updates: ["message"],
-      });
-      return Response.json({ ok: true, result });
+      const required = ["TELEGRAM_BOT_TOKEN", "ALLOWED_TELEGRAM_USER_ID", "ANTHROPIC_API_KEY", "NOTION_TOKEN"] as const;
+      const missing = required.filter((k) => !env[k]);
+      if (missing.length) return Response.json({ ok: false, error: `Missing secrets: ${missing.join(", ")}` }, { status: 500 });
+      if (!/^[A-Za-z0-9_-]{1,256}$/.test(env.TELEGRAM_WEBHOOK_SECRET)) {
+        const error = "TELEGRAM_WEBHOOK_SECRET may only use letters, numbers, _ and -. Set a new one and use it in this link.";
+        return Response.json({ ok: false, error }, { status: 500 });
+      }
+      try {
+        const result = await new Telegram(env.TELEGRAM_BOT_TOKEN).call("setWebhook", {
+          url: `${url.origin}/webhook`,
+          secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+          allowed_updates: ["message"],
+        });
+        return Response.json({ ok: true, result });
+      } catch (err) {
+        // Telegram answers "Unauthorized" or "Not Found" when the bot token is wrong.
+        return Response.json({ ok: false, error: (err as Error).message }, { status: 500 });
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/webhook") {
